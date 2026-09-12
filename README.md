@@ -53,10 +53,10 @@ Codex --prompt--> ChatGPT Web --read-only MCP--> workspace
 ```
 
 After the click, `c2c handoff wait` watches only the local Downloads folder,
-validates the C2C frontmatter, moves the file into `<workspace>/.c2c/inbox/`,
+validates the C2C frontmatter, moves the file into the C2C state inbox (or a directory selected with `--inbox`),
 and returns the local Markdown to Codex.
 
-The user may set `C2C_DOWNLOADS_DIR` or pass `--downloads` when the browser
+Use `--inbox <path>` when a specific destination directory is desired.\nThe user may set `C2C_DOWNLOADS_DIR` or pass `--downloads` when the browser
 and Codex use different home directories (for example Windows + WSL).
 
 
