@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getStateDir } from "../config/paths.js";
 
 export const HANDOFF_STATES = ["VERIFY", "PLAN", "REVIEW", "DONE", "BLOCKED"] as const;
 export type HandoffState = (typeof HANDOFF_STATES)[number];
@@ -14,11 +15,12 @@ export interface HandoffEnvelope {
 }
 
 export interface WaitForHandoffOptions {
-  workspaceRoot: string;
+  workspaceId: string;
   taskId: string;
   iteration?: number;
   allowedStates: readonly HandoffState[];
   sourceDir?: string;
+  inboxDir?: string;
   timeoutMs?: number;
   pollMs?: number;
 }
@@ -143,7 +145,9 @@ function findCandidate(
 
 export async function waitForHandoff(options: WaitForHandoffOptions): Promise<ImportedHandoff> {
   const sourceDir = path.resolve(options.sourceDir ?? defaultDownloadsDir());
-  const workspaceRoot = path.resolve(options.workspaceRoot);
+  const inboxDir = path.resolve(
+    options.inboxDir ?? path.join(getStateDir(), "handoffs", options.workspaceId, "inbox")
+  );
   const timeoutMs = options.timeoutMs ?? 30 * 60 * 1000;
   const pollMs = Math.max(250, options.pollMs ?? 1000);
   if (timeoutMs < 0) throw new Error("handoff timeout must be non-negative");
@@ -161,8 +165,7 @@ export async function waitForHandoff(options: WaitForHandoffOptions): Promise<Im
       notOlderThanMs
     );
     if (candidate) {
-      const inboxDir = path.join(workspaceRoot, ".c2c", "inbox");
-      fs.mkdirSync(inboxDir, { recursive: true });
+      fs.mkdirSync(inboxDir, { recursive: true, mode: 0o700 });
       const destinationPath = path.join(
         inboxDir,
         canonicalHandoffFilename(
