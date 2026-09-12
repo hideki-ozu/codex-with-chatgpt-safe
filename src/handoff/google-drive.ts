@@ -60,6 +60,13 @@ function runRclone(bin: string, args: string[], timeout = 30_000): RcloneResult 
   };
 }
 
+export function chatgptDriveFolderFromRemote(remote: string): string {
+  const value = remote.trim();
+  const colon = value.indexOf(":");
+  const drivePath = colon >= 0 ? value.slice(colon + 1) : value;
+  return drivePath.replace(/^\/+|\/+$/g, "");
+}
+
 function remoteJoin(remote: string, filename: string): string {
   const base = remote.trim().replace(/\/+$/, "");
   if (!base) throw new Error("google-drive remote is empty");
