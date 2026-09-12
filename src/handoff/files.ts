@@ -35,7 +35,7 @@ export function defaultDownloadsDir(): string {
   return path.resolve(override || path.join(os.homedir(), "Downloads"));
 }
 
-function safeTaskToken(taskId: string): string {
+export function safeTaskToken(taskId: string): string {
   const safe = taskId.trim().replace(/[^a-zA-Z0-9._-]+/g, "_");
   if (!safe) throw new Error("handoff task id is empty");
   return safe;
@@ -110,6 +110,37 @@ function moveAcrossDevices(sourcePath: string, destinationPath: string): void {
   }
 }
 
+export function handoffInboxDir(workspaceId: string, inboxDir?: string): string {
+  return path.resolve(inboxDir ?? path.join(getStateDir(), "handoffs", workspaceId, "inbox"));
+}
+
+export function storeHandoffFile(options: {
+  sourcePath: string;
+  workspaceId: string;
+  inboxDir?: string;
+  envelope: HandoffEnvelope;
+}): ImportedHandoff {
+  const inboxDir = handoffInboxDir(options.workspaceId, options.inboxDir);
+  fs.mkdirSync(inboxDir, { recursive: true, mode: 0o700 });
+  const destinationPath = path.join(
+    inboxDir,
+    canonicalHandoffFilename(
+      options.envelope.taskId,
+      options.envelope.state,
+      options.envelope.iteration
+    )
+  );
+  if (fs.existsSync(destinationPath)) {
+    throw new Error(`handoff already imported: ${destinationPath}`);
+  }
+  moveAcrossDevices(options.sourcePath, destinationPath);
+  return {
+    ...options.envelope,
+    sourcePath: options.sourcePath,
+    inboxPath: destinationPath,
+  };
+}
+
 function findCandidate(
   sourceDir: string,
   taskId: string,
@@ -145,9 +176,7 @@ function findCandidate(
 
 export async function waitForHandoff(options: WaitForHandoffOptions): Promise<ImportedHandoff> {
   const sourceDir = path.resolve(options.sourceDir ?? defaultDownloadsDir());
-  const inboxDir = path.resolve(
-    options.inboxDir ?? path.join(getStateDir(), "handoffs", options.workspaceId, "inbox")
-  );
+  const inboxDir = handoffInboxDir(options.workspaceId, options.inboxDir);
   const timeoutMs = options.timeoutMs ?? 30 * 60 * 1000;
   const pollMs = Math.max(250, options.pollMs ?? 1000);
   if (timeoutMs < 0) throw new Error("handoff timeout must be non-negative");
@@ -165,24 +194,12 @@ export async function waitForHandoff(options: WaitForHandoffOptions): Promise<Im
       notOlderThanMs
     );
     if (candidate) {
-      fs.mkdirSync(inboxDir, { recursive: true, mode: 0o700 });
-      const destinationPath = path.join(
-        inboxDir,
-        canonicalHandoffFilename(
-          candidate.envelope.taskId,
-          candidate.envelope.state,
-          candidate.envelope.iteration
-        )
-      );
-      if (fs.existsSync(destinationPath)) {
-        throw new Error(`handoff already imported: ${destinationPath}`);
-      }
-      moveAcrossDevices(candidate.filePath, destinationPath);
-      return {
-        ...candidate.envelope,
+      return storeHandoffFile({
         sourcePath: candidate.filePath,
-        inboxPath: destinationPath,
-      };
+        workspaceId: options.workspaceId,
+        inboxDir,
+        envelope: candidate.envelope,
+      });
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
