@@ -42,23 +42,44 @@ Detailed docs below are in English · 详细中文文档见 **[README.zh-CN.md](
 
 ### Safe Markdown handoff
 
-The original project reads ChatGPT replies back through browser automation.
-This fork changes only that return path:
+This fork never programmatically extracts ChatGPT assistant output from the web
+page. It supports two return backends:
+
+**Google Drive (recommended for a separate Ubuntu Server)**
 
 ```text
-Codex --prompt--> ChatGPT Web --read-only MCP--> workspace
-  ^
-  |
-  +-- .md file <-- user clicks Download
+ChatGPT Web
+   ↓ official Google Drive app/action
+Google Drive / C2C-Handoff / inbox
+   ↓ rclone
+Ubuntu Server
+   ↓
+Codex
 ```
 
-After the click, `c2c handoff wait` watches only the local Downloads folder,
-validates the C2C frontmatter, moves the file into the C2C state inbox (or a directory selected with `--inbox`),
-and returns the local Markdown to Codex.
+ChatGPT itself writes the C2C Markdown file through the connected official
+Google Drive app. Ubuntu receives it with `rclone`. No browser Download is needed.
 
-Use `--inbox <path>` when a specific destination directory is desired.\nThe user may set `C2C_DOWNLOADS_DIR` or pass `--downloads` when the browser
-and Codex use different home directories (for example Windows + WSL).
+Configure per workspace:
 
+```bash
+c2c handoff configure -w <workspace> \
+  --backend google-drive \
+  --remote gdrive:C2C-Handoff/inbox \
+  --archive-remote gdrive:C2C-Handoff/processed
+
+c2c handoff status -w <workspace> --check --json
+```
+
+**Local fallback**
+
+ChatGPT creates a downloadable C2C Markdown file, the user explicitly clicks
+**Download**, and `c2c handoff wait` watches only the local filesystem.
+
+In both modes, DOM/clipboard/network/OCR extraction and automatic Download clicks
+are intentionally out of scope.
+
+See **[Headless Ubuntu + Google Drive setup](docs/google-drive-handoff.md)**.
 
 ## One-paste install · 一段话安装
 
@@ -131,8 +152,9 @@ anytime. / Skill 每天自动检查一次 GitHub，有新版本会自动更新�
 1. Install the Codex Skill: copy `skill/` to `~/.codex/skills/codex-with-chatgpt/`.
 2. Tell Codex: **"Set up Codex with ChatGPT."** (中文: "使用 Codex with ChatGPT 完成首次配置。")
 3. Use Codex normally: **"Use Codex with ChatGPT to implement XXX."**
-4. When ChatGPT presents a C2C Markdown result, click **Download** once.
-   Codex will detect the local file and continue automatically.
+4. Recommended for remote Ubuntu: configure the Google Drive handoff backend.
+   ChatGPT then saves C2C Markdown directly to Drive and Ubuntu receives it with rclone.
+   In local fallback mode, click **Download** once when ChatGPT presents the file.
 
 
 That's the whole manual. You don't need to know what MCP, OAuth, tunnels,
