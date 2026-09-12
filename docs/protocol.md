@@ -127,7 +127,7 @@ When a valid file appears, the CLI:
 
 1. reads the local file,
 2. validates `protocol`, `task_id`, `state`, and `iteration`,
-3. moves it to `<workspace>/.c2c/inbox/`,
+3. moves it to the C2C state inbox (or the explicit `--inbox` directory),
 4. returns the parsed local body to Codex.
 
 Malformed, unrelated, stale, and partially downloaded files are ignored while waiting.
@@ -359,8 +359,7 @@ Codex pauses and asks the user whether to continue.
 The safe fork intentionally keeps these operations manual or local:
 
 - **Manual:** clicking ChatGPT's Download control.
-- **Local automation:** watching Downloads, validating the Markdown, moving it into
-  `.c2c/inbox`, parsing it, executing the plan.
+- **Local automation:** watching Downloads, validating the Markdown, moving it into the C2C state inbox (or `--inbox`), parsing it, executing the plan.
 - **Forbidden to the Skill:** extracting assistant output from ChatGPT DOM, clipboard,
   screenshots/OCR, accessibility tree, hidden/private endpoints, or network interception.
 
