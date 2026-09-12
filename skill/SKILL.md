@@ -182,7 +182,7 @@ that close the tab, hide the window, or stall on the settings page.
    Immediately run the LOCAL watcher:
    `c2c handoff wait -w <ws> --task <task-id> --states <allowed-states> --json`.
    The command watches only the local Downloads folder, validates the downloaded
-   file, moves it into `<workspace>/.c2c/inbox/`, and returns the LOCAL file body.
+   file, moves it into the C2C state inbox (or an explicit `--inbox` directory), and returns the LOCAL file body.
 
    A browser/js timeout is not a reason to scrape the reply or resend a prompt.
    If no file arrives, keep the visible tab available and let the user perform the
@@ -550,7 +550,7 @@ Do not read ChatGPT response text from the browser.
    - `BLOCKED`: surface the stored local reason.
    - `EXECUTED_LOCAL`: send EXECUTED; do not re-run work.
    - `EXECUTING` / `PLAN_RECEIVED`: continue local execution when the plan is
-     already available in `.c2c/inbox`; otherwise request a fresh downloadable
+     already available in the C2C handoff inbox; otherwise request a fresh downloadable
      PLAN handoff.
    - `INIT` / waiting for GPT_PLAN: do not resend INIT automatically. Start the
      local handoff watcher and let the user download the pending PLAN file.
@@ -643,7 +643,7 @@ Do not rely on Codex reading your visible chat response.
    `c2c handoff wait -w <ws> --task <id> --states PLAN,DONE,BLOCKED --json`
 
    The watcher ignores stale/unrelated Markdown, validates frontmatter, moves the
-   accepted file to `.c2c/inbox`, and returns its LOCAL body.
+   accepted file to the C2C state inbox (or `--inbox`), and returns its LOCAL body.
 
 8. Branch only on the LOCAL handoff state:
    - `PLAN`: save PLAN_RECEIVED, execute it, then repeat from step 4.
