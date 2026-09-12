@@ -62,6 +62,15 @@ import {
   waitForHandoff,
   type HandoffState,
 } from "../handoff/files.js";
+import {
+  readHandoffConfig,
+  writeHandoffConfig,
+  type HandoffBackend,
+} from "../handoff/config.js";
+import {
+  checkRcloneDrive,
+  waitForGoogleDriveHandoff,
+} from "../handoff/google-drive.js";
 
 const program = new Command();
 
@@ -781,22 +790,113 @@ program
     }
   });
 
-// ---------------------------------------------------------------- handoff (user-downloaded ChatGPT Markdown -> local inbox)
+// ---------------------------------------------------------------- handoff (safe ChatGPT Markdown -> local state inbox)
 
 const handoffCmd = program
   .command("handoff")
-  .description("Receive ChatGPT handoff Markdown from the local Downloads folder");
+  .description("Configure and receive safe ChatGPT Markdown handoffs");
+
+handoffCmd
+  .command("configure")
+  .description("Save the handoff backend for this workspace")
+  .option("-w, --workspace <path>")
+  .requiredOption("--backend <backend>", "local or google-drive")
+  .option("--downloads <path>", "local Downloads directory for local backend")
+  .option("--inbox <path>", "local destination for accepted handoffs")
+  .option("--remote <remote>", "rclone Drive folder, e.g. gdrive:C2C-Handoff/inbox")
+  .option("--archive-remote <remote>", "optional rclone folder for processed handoffs")
+  .option("--rclone-bin <path>", "rclone executable", "rclone")
+  .option("--json", "machine-readable output", false)
+  .action((opts: {
+    workspace?: string;
+    backend: string;
+    downloads?: string;
+    inbox?: string;
+    remote?: string;
+    archiveRemote?: string;
+    rcloneBin: string;
+    json: boolean;
+  }) => {
+    try {
+      const workspace = new Workspace(resolveWorkspace(opts.workspace));
+      const backend = opts.backend.trim().toLowerCase() as HandoffBackend;
+      if (backend !== "local" && backend !== "google-drive") {
+        throw new Error("backend must be local or google-drive");
+      }
+      const config =
+        backend === "local"
+          ? {
+              backend,
+              local: {
+                downloadsDir: opts.downloads ? path.resolve(opts.downloads) : undefined,
+                inboxDir: opts.inbox ? path.resolve(opts.inbox) : undefined,
+              },
+            }
+          : {
+              backend,
+              googleDrive: {
+                remote: opts.remote?.trim() ?? "",
+                archiveRemote: opts.archiveRemote?.trim() || undefined,
+                rcloneBin: opts.rcloneBin?.trim() || "rclone",
+                inboxDir: opts.inbox ? path.resolve(opts.inbox) : undefined,
+              },
+            };
+      const saved = writeHandoffConfig(workspace.id, config);
+      if (opts.json) say(JSON.stringify({ ok: true, workspaceId: workspace.id, config: saved }));
+      else check(`Handoff backend configured: ${saved.backend}`);
+    } catch (error) {
+      handleCliError(error, opts.json);
+    }
+  });
+
+handoffCmd
+  .command("status")
+  .description("Show the saved handoff backend and verify Google Drive connectivity")
+  .option("-w, --workspace <path>")
+  .option("--check", "verify rclone remote connectivity", false)
+  .option("--json", "machine-readable output", false)
+  .action((opts: { workspace?: string; check: boolean; json: boolean }) => {
+    try {
+      const workspace = new Workspace(resolveWorkspace(opts.workspace));
+      const config = readHandoffConfig(workspace.id);
+      let checkResult: ReturnType<typeof checkRcloneDrive> | undefined;
+      if (opts.check && config.backend === "google-drive" && config.googleDrive) {
+        checkResult = checkRcloneDrive(
+          config.googleDrive.remote,
+          config.googleDrive.rcloneBin ?? "rclone"
+        );
+      }
+      const payload = { ok: true, workspaceId: workspace.id, config, check: checkResult };
+      if (opts.json) say(JSON.stringify(payload));
+      else {
+        say(`Backend: ${config.backend}`);
+        if (config.backend === "local") {
+          say(`Downloads: ${config.local?.downloadsDir ?? defaultDownloadsDir()}`);
+        } else if (config.googleDrive) {
+          say(`Remote: ${config.googleDrive.remote}`);
+          if (config.googleDrive.archiveRemote) say(`Archive: ${config.googleDrive.archiveRemote}`);
+          if (checkResult) say(checkResult.ok ? "✓ Google Drive reachable" : `✗ ${checkResult.detail}`);
+        }
+      }
+    } catch (error) {
+      handleCliError(error, opts.json);
+    }
+  });
 
 handoffCmd
   .command("wait")
-  .description("Wait for a user-downloaded C2C Markdown handoff and move it into .c2c/inbox")
+  .description("Wait for a C2C Markdown handoff using the configured backend")
   .option("-w, --workspace <path>")
   .requiredOption("--task <id>", "C2C task id expected in YAML frontmatter")
   .option("--iteration <n>", "optional exact iteration", parseNonNegativeInteger)
   .option("--states <states>", "comma-separated allowed states", "PLAN,DONE,BLOCKED")
-  .option("--downloads <path>", "local download folder (or set C2C_DOWNLOADS_DIR)")
-  .option("--inbox <path>", "destination directory for accepted handoff files")
-  .option("--timeout <seconds>", "seconds to wait for the manual download", parseNonNegativeInteger, 1800)
+  .option("--backend <backend>", "override saved backend: local or google-drive")
+  .option("--downloads <path>", "override local Downloads folder")
+  .option("--inbox <path>", "override destination directory for accepted handoffs")
+  .option("--remote <remote>", "override rclone Drive folder")
+  .option("--archive-remote <remote>", "override processed Drive folder")
+  .option("--rclone-bin <path>", "override rclone executable")
+  .option("--timeout <seconds>", "seconds to wait for the handoff", parseNonNegativeInteger, 1800)
   .option("--json", "machine-readable output", false)
   .action(
     async (opts: {
@@ -804,8 +904,12 @@ handoffCmd
       task: string;
       iteration?: number;
       states: string;
+      backend?: string;
       downloads?: string;
       inbox?: string;
+      remote?: string;
+      archiveRemote?: string;
+      rcloneBin?: string;
       timeout: number;
       json: boolean;
     }) => {
@@ -819,24 +923,58 @@ handoffCmd
         }
 
         const workspace = new Workspace(resolveWorkspace(opts.workspace));
-        const result = await waitForHandoff({
-          workspaceId: workspace.id,
-          taskId: opts.task,
-          iteration: opts.iteration,
-          allowedStates: states as HandoffState[],
-          sourceDir: opts.downloads ? path.resolve(opts.downloads) : defaultDownloadsDir(),
-          inboxDir: opts.inbox ? path.resolve(opts.inbox) : undefined,
-          timeoutMs: opts.timeout * 1000,
-        });
+        const saved = readHandoffConfig(workspace.id);
+        const backendRaw = opts.backend?.trim().toLowerCase() ?? saved.backend;
+        if (backendRaw !== "local" && backendRaw !== "google-drive") {
+          throw new Error("backend must be local or google-drive");
+        }
+
+        const result =
+          backendRaw === "google-drive"
+            ? await waitForGoogleDriveHandoff({
+                workspaceId: workspace.id,
+                taskId: opts.task,
+                iteration: opts.iteration,
+                allowedStates: states as HandoffState[],
+                remote: opts.remote?.trim() || saved.googleDrive?.remote || "",
+                archiveRemote:
+                  opts.archiveRemote?.trim() || saved.googleDrive?.archiveRemote,
+                rcloneBin:
+                  opts.rcloneBin?.trim() || saved.googleDrive?.rcloneBin || "rclone",
+                inboxDir:
+                  opts.inbox ? path.resolve(opts.inbox) : saved.googleDrive?.inboxDir,
+                timeoutMs: opts.timeout * 1000,
+              })
+            : await waitForHandoff({
+                workspaceId: workspace.id,
+                taskId: opts.task,
+                iteration: opts.iteration,
+                allowedStates: states as HandoffState[],
+                sourceDir:
+                  opts.downloads
+                    ? path.resolve(opts.downloads)
+                    : saved.local?.downloadsDir ?? defaultDownloadsDir(),
+                inboxDir:
+                  opts.inbox ? path.resolve(opts.inbox) : saved.local?.inboxDir,
+                timeoutMs: opts.timeout * 1000,
+              });
 
         const payload = {
           ok: true,
+          backend: backendRaw,
           taskId: result.taskId,
           state: result.state,
           iteration: result.iteration,
           inboxPath: result.inboxPath,
           sourcePath: result.sourcePath,
           body: result.body,
+          ...(backendRaw === "google-drive"
+            ? {
+                remotePath: "remotePath" in result ? result.remotePath : undefined,
+                archivePath: "archivePath" in result ? result.archivePath : undefined,
+                archiveWarning: "archiveWarning" in result ? result.archiveWarning : undefined,
+              }
+            : {}),
         };
         if (opts.json) say(JSON.stringify(payload));
         else {
