@@ -4,28 +4,90 @@ This fork keeps the original split of responsibilities:
 
 - **Codex executes**: edit, shell, tests, git, recovery.
 - **ChatGPT plans and reviews**: it reads the workspace through the read-only MCP connector.
-- **ChatGPT → Codex results are never extracted from the ChatGPT web UI.**
-  The result crosses the boundary only as a Markdown file that the user explicitly downloads.
+- **ChatGPT → Codex results are never scraped from the ChatGPT web UI.**
 - **Codex → ChatGPT prompts** may still be typed through the supported in-app browser.
 
-The manual Download click is a deliberate trust boundary. Codex must not click the
-Download button, copy assistant text, read assistant-message DOM, scrape the accessibility
-tree, OCR the answer, intercept network responses, or read the clipboard to obtain ChatGPT output.
+C2C supports two safe return transports:
+
+1. **google-drive** (recommended for a remote/headless Linux executor): ChatGPT itself
+   uses its connected **official Google Drive app/action** to save the Markdown file into
+   a configured Drive folder. Ubuntu receives it with `rclone`.
+2. **local** (fallback): ChatGPT creates a downloadable Markdown file and the user
+   explicitly clicks **Download**. Codex watches only the local filesystem.
+
+Neither backend permits Codex to read assistant-message DOM, accessibility output,
+screenshots/OCR, clipboard content, hidden endpoints, or ChatGPT network responses.
+Codex must never automate the ChatGPT Download click.
 
 ## Data paths
+
+### Google Drive backend
+
+```text
+Codex --visible prompt--> ChatGPT Web
+  ^                         | \
+  |                         |  \ official Google Drive app/action
+  | read-only MCP           |   v
+  |                         | Google Drive/C2C-Handoff/inbox
+  |                         |   |
+  |                         |   | rclone
+  |                         v   v
+  +-------------------- Ubuntu Server
+                         local C2C inbox
+```
+
+### Local fallback
 
 ```text
 Codex --visible prompt--> ChatGPT Web
   ^                         |
   |                         | read-only MCP
   |                         v
-  |                    local workspace
+  |                    workspace
   |
   +-- local .md file <-- user clicks Download
 ```
 
-ChatGPT still reads code, git diffs, test metadata, and released command output through
-the existing MCP connector. Repository contents do not need to be pasted into the chat.
+## Configure the handoff backend
+
+Configuration is stored per workspace in the C2C state directory, not in the project.
+
+### Google Drive
+
+First configure `rclone` on the Linux executor so a Drive remote such as `gdrive:`
+works. Then:
+
+```bash
+c2c handoff configure -w <workspace> \
+  --backend google-drive \
+  --remote gdrive:C2C-Handoff/inbox \
+  --archive-remote gdrive:C2C-Handoff/processed
+```
+
+Verify:
+
+```bash
+c2c handoff status -w <workspace> --check --json
+```
+
+The JSON includes `chatgptFolder`, for example:
+
+```json
+{
+  "config": { "backend": "google-drive" },
+  "chatgptFolder": "C2C-Handoff/inbox"
+}
+```
+
+That is the folder ChatGPT should target through its connected Google Drive app.
+
+### Local
+
+```bash
+c2c handoff configure -w <workspace> \
+  --backend local \
+  --downloads /path/to/Downloads
+```
 
 ## States
 
@@ -33,15 +95,15 @@ the existing MCP connector. Repository contents do not need to be pasted into th
 INIT → PLAN → EXECUTING → EXECUTED → REVIEW → PLAN | DONE | BLOCKED | ERROR
 ```
 
-| State | Producer | Transport |
+| State | Producer | Return transport |
 | --- | --- | --- |
 | INIT | Codex | visible ChatGPT prompt |
-| PLAN | ChatGPT | user-downloaded Markdown |
+| PLAN | ChatGPT | Drive file or manual-download file |
 | EXECUTING | Codex | local only |
 | EXECUTED | Codex | visible ChatGPT prompt |
 | REVIEW | ChatGPT | implicit while it inspects via MCP |
-| DONE | ChatGPT | user-downloaded Markdown |
-| BLOCKED | ChatGPT | user-downloaded Markdown |
+| DONE | ChatGPT | Drive file or manual-download file |
+| BLOCKED | ChatGPT | Drive file or manual-download file |
 | ERROR | either | local/browser error handling |
 | HANDOFF | Codex | visible ChatGPT prompt |
 
@@ -49,8 +111,7 @@ There is no `STATE: RESUME`. Local checkpoint state remains in the C2C session f
 
 ## Markdown handoff format
 
-Every ChatGPT → Codex result must be created as a downloadable UTF-8 Markdown file.
-The file starts with this YAML-like frontmatter:
+Every ChatGPT → Codex result is a UTF-8 Markdown file beginning with:
 
 ```yaml
 ---
@@ -61,15 +122,15 @@ iteration: 1
 ---
 ```
 
-Valid handoff states are:
+Valid handoff states:
 
-- `VERIFY` — one-time workspace identity check
+- `VERIFY` — workspace identity check
 - `PLAN` — executable next-step plan
 - `REVIEW` — optional review-only report
 - `DONE` — success criteria are satisfied
-- `BLOCKED` — ChatGPT needs a user decision or unavailable prerequisite
+- `BLOCKED` — a user decision or unavailable prerequisite is required
 
-The canonical filename is:
+Canonical filename:
 
 ```text
 c2c-<task_id>-<state-lowercase>-<iteration>.md
@@ -83,13 +144,33 @@ c2c-c2c_f81a-plan-1.md
 c2c-c2c_f81a-done-3.md
 ```
 
-Browsers may append a duplicate suffix to a downloaded filename. The receiver validates
-the frontmatter, so the protocol does not trust the filename alone.
+The receiver validates frontmatter and never trusts only the filename.
 
-## Receiving a handoff
+## Asking ChatGPT to return a handoff
 
-After asking ChatGPT to create a handoff file, Codex immediately waits on the **local**
-Downloads directory:
+Before every ChatGPT → Codex result, read:
+
+```bash
+c2c handoff status -w <workspace> --json
+```
+
+### If backend = google-drive
+
+Tell ChatGPT:
+
+```text
+Create the requested C2C Markdown file with the exact filename and frontmatter.
+Use your connected Google Drive app/action to save the file directly into:
+<chatgptFolder>
+
+Do not rely on Codex reading your visible chat response.
+The Google Drive file is the authoritative result.
+```
+
+ChatGPT may require a normal product confirmation for the Drive write action. That is
+allowed; do not bypass it.
+
+Then Codex waits only on Drive:
 
 ```bash
 c2c handoff wait -w <workspace> \
@@ -98,52 +179,31 @@ c2c handoff wait -w <workspace> \
   --json
 ```
 
-For an exact first plan:
+The Ubuntu-side receiver:
 
-```bash
-c2c handoff wait -w <workspace> \
-  --task c2c_f81a \
-  --iteration 1 \
-  --states PLAN \
-  --json
-```
+1. lists the configured Drive inbox with `rclone`,
+2. copies a candidate to a local staging area,
+3. validates `protocol`, `task_id`, `state`, and `iteration`,
+4. moves the accepted file into the local C2C state inbox,
+5. optionally moves the Drive source into the configured processed/archive folder,
+6. returns the parsed local body to Codex.
 
-If the browser downloads somewhere else, set either:
+### If backend = local
 
-```bash
-C2C_DOWNLOADS_DIR=/path/to/downloads
-```
-
-or pass:
-
-```bash
---downloads /path/to/downloads
-```
-
-On Windows, the default is the current user's `Downloads` folder. Under WSL, explicitly
-point `--downloads` or `C2C_DOWNLOADS_DIR` at the Windows Downloads directory when needed.
-
-When a valid file appears, the CLI:
-
-1. reads the local file,
-2. validates `protocol`, `task_id`, `state`, and `iteration`,
-3. moves it to the C2C state inbox (or the explicit `--inbox` directory),
-4. returns the parsed local body to Codex.
-
-Malformed, unrelated, stale, and partially downloaded files are ignored while waiting.
+Ask ChatGPT to create the exact downloadable Markdown file. Tell the user to click
+**Download** when it appears, then run the same `c2c handoff wait` command.
 
 ## Workspace verification
 
-Do not verify the workspace by reading a ChatGPT reply from the page.
+Never verify the workspace by reading a ChatGPT reply from the page.
 
-Send this request instead:
+Use task `setup`, state `VERIFY`, iteration `0`:
 
 ```text
 Use the "<connectorName>" connector.
 Call workspace_info and read a harmless top-level hello-style file.
-Create a downloadable Markdown file named c2c-setup-verify-0.md.
 
-The file must be:
+Create c2c-setup-verify-0.md with:
 ---
 protocol: c2c
 task_id: setup
@@ -151,11 +211,12 @@ state: VERIFY
 iteration: 0
 ---
 
-Put the workspace name and the harmless filename you read in the body.
-Do not rely on Codex reading your chat response.
+Put the workspace name and harmless filename in the body.
+Return it through the configured C2C handoff backend.
+Do not rely on Codex reading your visible chat response.
 ```
 
-Then the user clicks **Download** and Codex runs:
+Then:
 
 ```bash
 c2c handoff wait -w <workspace> \
@@ -165,7 +226,7 @@ c2c handoff wait -w <workspace> \
   --json
 ```
 
-Codex compares the **local file body** with the expected workspace identity.
+Codex compares the LOCAL received file body with the expected workspace identity.
 
 ## INIT (Codex → ChatGPT)
 
@@ -180,13 +241,14 @@ Implement dark mode.
 
 INSTRUCTION:
 Inspect the connected workspace through the Codex with ChatGPT MCP connector.
-Create a downloadable Markdown handoff named c2c-c2c_f81a-plan-1.md.
-Use protocol=c2c, task_id=c2c_f81a, state=PLAN, iteration=1.
+Create c2c-c2c_f81a-plan-1.md with protocol=c2c, task_id=c2c_f81a,
+state=PLAN, iteration=1.
 Put rationale, concrete actions, likely files, tests, and success criteria in the file.
-Do not rely on Codex reading your chat response.
+Return it through the configured C2C handoff backend.
+Do not rely on Codex reading your visible chat response.
 ```
 
-## PLAN file (ChatGPT → Codex)
+## PLAN file
 
 ```markdown
 ---
@@ -216,11 +278,9 @@ iteration: 1
 ...
 ```
 
-Plans must be finite, concrete, and executable.
-
 ## EXECUTED (Codex → ChatGPT)
 
-Before sending EXECUTED, Codex records execution metadata:
+Record execution metadata first:
 
 ```bash
 c2c record -w <workspace> \
@@ -231,10 +291,7 @@ c2c record -w <workspace> \
   --exit-status ok
 ```
 
-When a test/build/lint/typecheck produced useful output, Codex may nominate that local
-output through the existing sanitized `execution_output` path.
-
-Then Codex sends:
+Then send:
 
 ```text
 [C2C]
@@ -245,15 +302,18 @@ ITERATION: 1
 RESULT:
 Execution finished.
 
-Please independently inspect the workspace and current git diff through MCP.
-If another iteration is required, create a PLAN handoff file.
-If the task is complete, create a DONE handoff file.
-If blocked, create a BLOCKED handoff file.
+Independently inspect the workspace, git diff, tests, and any released execution output
+through MCP.
 
-Use the same task_id. Do not rely on Codex reading your chat response.
+If more work is needed, create a PLAN Markdown handoff.
+If complete, create a DONE Markdown handoff.
+If blocked, create a BLOCKED Markdown handoff.
+
+Return exactly one result file through the configured C2C handoff backend.
+Do not rely on Codex reading your visible chat response.
 ```
 
-Codex then waits locally:
+Then:
 
 ```bash
 c2c handoff wait -w <workspace> \
@@ -262,71 +322,7 @@ c2c handoff wait -w <workspace> \
   --json
 ```
 
-## DONE file
-
-```markdown
----
-protocol: c2c
-task_id: c2c_f81a
-state: DONE
-iteration: 3
----
-
-# Summary
-...
-
-# Verification
-...
-```
-
-## BLOCKED file
-
-```markdown
----
-protocol: c2c
-task_id: c2c_f81a
-state: BLOCKED
-iteration: 3
----
-
-# Reason
-...
-
-# Needs
-...
-```
-
-## HANDOFF to a replacement ChatGPT conversation
-
-HANDOFF remains a small visible prompt. It carries task history, not source files:
-
-```text
-[C2C]
-STATE: HANDOFF
-TASK_ID: c2c_f81a
-ITERATION: 4
-
-ORIGINAL_GOAL:
-Implement dark mode with a persisted user preference.
-
-PROGRESS:
-- Iter 1-2: theme context + toggle implemented and reviewed.
-
-CURRENT_STATE:
-EXECUTED
-
-KNOWN_ISSUES:
-...
-
-NEXT_EXPECTED_STEP:
-Review the current diff via MCP and create the next downloadable C2C Markdown handoff.
-```
-
-The new ChatGPT conversation re-reads current code through MCP.
-
 ## Boot prompt
-
-Send this once at the start of a C2C conversation:
 
 ```text
 You are the planning and review layer of a Codex coding session.
@@ -342,25 +338,33 @@ Rules:
 3. Use MCP to inspect current code, git status, diffs, tests, and released execution output.
 4. Produce concise, executable plans and independent reviews.
 5. Never assume execution succeeded merely because Codex says so.
-6. ChatGPT-to-Codex results must be downloadable C2C Markdown handoff files.
-7. Never rely on Codex reading your visible chat response.
-8. Use the exact filename, task_id, state, and iteration requested by Codex.
-9. Keep the visible chat response minimal; the Markdown file is the authoritative result.
+6. ChatGPT-to-Codex results must be C2C Markdown handoff files.
+7. Return each handoff through the transport specified by Codex:
+   - google-drive: save it with the connected official Google Drive app/action.
+   - local: create it as a downloadable file for the user.
+8. Never rely on Codex reading your visible chat response.
+9. Use the exact filename, task_id, state, and iteration requested by Codex.
 10. If you receive HANDOFF, re-read needed code through MCP and continue from NEXT_EXPECTED_STEP.
 ```
 
-## Loop limits
-
-`maxIterations` remains configurable in `.c2c.json` (default 12). At the limit,
-Codex pauses and asks the user whether to continue.
-
 ## Security boundary
 
-The safe fork intentionally keeps these operations manual or local:
+Allowed:
 
-- **Manual:** clicking ChatGPT's Download control.
-- **Local automation:** watching Downloads, validating the Markdown, moving it into the C2C state inbox (or `--inbox`), parsing it, executing the plan.
-- **Forbidden to the Skill:** extracting assistant output from ChatGPT DOM, clipboard,
-  screenshots/OCR, accessibility tree, hidden/private endpoints, or network interception.
+- ChatGPT's connected official Google Drive app/action writing the handoff file.
+- Ubuntu `rclone` reading the user's own Drive folder.
+- User manually clicking Download in local fallback mode.
+- Local parsing, validation, archival, and execution after the file reaches the user's
+  own filesystem or Drive.
 
-This boundary is intentional even when browser automation could technically click Download.
+Forbidden to the Skill:
+
+- assistant-message DOM extraction,
+- accessibility-tree extraction of assistant output,
+- screenshots/OCR of the answer,
+- clipboard extraction,
+- hidden/private ChatGPT endpoints,
+- ChatGPT network interception,
+- automated Download clicks.
+
+The return path is intentionally independent from ChatGPT page scraping.
