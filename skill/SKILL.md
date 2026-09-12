@@ -143,8 +143,8 @@ that close the tab, hide the window, or stall on the settings page.
    address into Project instructions — write the connector **name** only.
 
 5. **Do not wait for 8 tools** on the settings page. "Connected" / authorize
-   success / pairing accepted is enough. Confirm tools in the conversation with
-   `workspace_info`.
+   success / pairing accepted is enough. Confirm the connector later through
+   **Safe workspace verification**; do not read a ChatGPT reply from the page.
 
 6. **Batch.** Fill a known form in one Playwright / `js` script when you can.
    After an action, one cheap DOM check. Do not screenshot-poll.
@@ -440,8 +440,8 @@ One ChatGPT Project per workspace. Mapping:
 - Else if `conversation.projectReady`: `goto` `conversation.projectUrl`.
   On that page, use the on-page composer (「{项目名}中的新聊天」 / "New chat
   in …"). Do not use the sidebar and do not `goto` `https://chatgpt.com/`.
-  Confirm Chat mode (**In-app browser** §7). Boot prompt, then workspace_info
-  with the **exact** `connectorName`. After **Safe workspace verification** succeeds,
+  Confirm Chat mode (**In-app browser** §7). Send the boot prompt, then run
+  **Safe workspace verification** with the exact `connectorName`. After it succeeds,
   `c2c session set -w <ws> --mode project --project-url <collection> --url <chat> --connector-name "<connectorName>" --title "C2C <workspace name>"`.
   If this Codex thread is continuing a previous C2C task, send HANDOFF right
   after the boot prompt.
@@ -456,8 +456,9 @@ Also offer「继续用长对话」. If they pick long-chat:
 If the collection 404s or the new chat is not inside the Project, same choice.
 
 **Saved chat 404s** (this thread): `goto` the collection, open a new chat
-there, boot + HANDOFF from `session.checkpoint` (no logs) + workspace_info,
-then save the new chat URL. Keep `--project-url`.
+there, boot + HANDOFF from `session.checkpoint` (no logs), then run
+**Safe workspace verification** and save the new chat URL only after the LOCAL
+VERIFY file matches. Keep `--project-url`.
 
 ### Bind Project (user creates the collection once)
 
@@ -707,16 +708,17 @@ the previous public address is gone. Doctor already started a new one.
    reopen the chat this Codex thread was already using (`session.url` /
    the URL you saved earlier in THIS thread). Do not rewrite Project
    instructions — they store the connector **name**, which did not change.
-   In that same chat, send the workspace_info check from setup step 6
-   (exact `connectorName`). Doctor green is not enough: the old conversation
-   may still be bound to the deleted connector.
-   - If the reply names this workspace: continue there. Save the URL if needed.
-   - If workspace_info fails, times out, or cannot read the name: do **not**
-     keep retrying that old URL. project → collection page, new chat in this
-     Project, boot + HANDOFF from `session.checkpoint` (no logs) +
-     workspace_info, then `c2c session set --url` only after the name matches.
-     long-chat → Conversation management switch, same checks. Keep the old
-     saved URL until the new chat passes.
+   Run **Safe workspace verification** with the exact `connectorName`.
+   Doctor green is not enough: the old conversation may still be bound to the
+   deleted connector.
+   - If the downloaded LOCAL VERIFY file names this workspace: continue there.
+     Save the URL if needed.
+   - If verification fails or no valid file is downloaded: do **not** scrape
+     the page and do not keep retrying that old URL. project → collection page,
+     new chat in this Project, boot + HANDOFF from `session.checkpoint` (no
+     logs), then **Safe workspace verification**; `c2c session set --url` only
+     after the LOCAL file matches. long-chat → Conversation management switch,
+     same checks. Keep the old saved URL until the new chat passes.
 5. If the ChatGPT conversation was lost: same as the failure path in step 4.
    No file re-uploading (the workspace lives in MCP). If tools point at
    the wrong connector, open 项目设置 and confirm 指令 still names
