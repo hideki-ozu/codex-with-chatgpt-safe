@@ -44,6 +44,7 @@ iteration: 2
   it("moves a downloaded handoff into the workspace inbox", async () => {
     const downloads = tempDir("downloads");
     const workspace = tempDir("workspace");
+    const inbox = path.join(workspace, "inbox");
     const file = canonicalHandoffFilename("task-2", "DONE", 3);
     fs.writeFileSync(
       path.join(downloads, file),
@@ -60,8 +61,9 @@ Finished.
     );
 
     const result = await waitForHandoff({
-      workspaceRoot: workspace,
+      workspaceId: "workspace-test",
       sourceDir: downloads,
+      inboxDir: inbox,
       taskId: "task-2",
       iteration: 3,
       allowedStates: ["DONE"],
@@ -78,12 +80,14 @@ Finished.
   it("ignores malformed or mismatched Markdown", async () => {
     const downloads = tempDir("bad-downloads");
     const workspace = tempDir("bad-workspace");
+    const inbox = path.join(workspace, "inbox");
     fs.writeFileSync(path.join(downloads, "c2c-task-3-plan-1.md"), "# not a handoff\n");
 
     await expect(
       waitForHandoff({
-        workspaceRoot: workspace,
+        workspaceId: "workspace-bad",
         sourceDir: downloads,
+        inboxDir: inbox,
         taskId: "task-3",
         allowedStates: ["PLAN"],
         timeoutMs: 30,
