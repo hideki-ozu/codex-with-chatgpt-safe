@@ -78,7 +78,7 @@ c2c-<task_id>-<state-lowercase>-<iteration>.md
 Examples:
 
 ```text
-c2c-setup-verify-verify-0.md
+c2c-setup-verify-0.md
 c2c-c2c_f81a-plan-1.md
 c2c-c2c_f81a-done-3.md
 ```
@@ -141,12 +141,12 @@ Send this request instead:
 ```text
 Use the "<connectorName>" connector.
 Call workspace_info and read a harmless top-level hello-style file.
-Create a downloadable Markdown file named c2c-setup-verify-verify-0.md.
+Create a downloadable Markdown file named c2c-setup-verify-0.md.
 
 The file must be:
 ---
 protocol: c2c
-task_id: setup-verify
+task_id: setup
 state: VERIFY
 iteration: 0
 ---
@@ -159,7 +159,7 @@ Then the user clicks **Download** and Codex runs:
 
 ```bash
 c2c handoff wait -w <workspace> \
-  --task setup-verify \
+  --task setup \
   --iteration 0 \
   --states VERIFY \
   --json
