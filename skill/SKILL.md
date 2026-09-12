@@ -194,10 +194,10 @@ that close the tab, hide the window, or stall on the settings page.
 Never verify a workspace by reading a ChatGPT reply from the web page.
 
 1. In the current ChatGPT conversation send:
-   `Use the "<connectorName>" connector. Call workspace_info and read a harmless top-level hello-style file. Create a downloadable Markdown file named c2c-setup-verify-verify-0.md with protocol=c2c, task_id=setup-verify, state=VERIFY, iteration=0. Put the workspace name and harmless filename in the file body. Do not rely on Codex reading your chat response.`
+   `Use the "<connectorName>" connector. Call workspace_info and read a harmless top-level hello-style file. Create a downloadable Markdown file named c2c-setup-verify-0.md with protocol=c2c, task_id=setup-verify, state=VERIFY, iteration=0. Put the workspace name and harmless filename in the file body. Do not rely on Codex reading your chat response.`
 2. Tell the user to click **Download** when that file appears. Codex must not click it.
 3. Run:
-   `c2c handoff wait -w <ws> --task setup-verify --iteration 0 --states VERIFY --json`
+   `c2c handoff wait -w <ws> --task setup --iteration 0 --states VERIFY --json`
 4. Compare the returned LOCAL Markdown body with the expected `workspaceName`.
    Only after it matches may you save or replace the ChatGPT conversation URL.
 
