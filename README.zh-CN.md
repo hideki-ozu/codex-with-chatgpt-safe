@@ -1,4 +1,12 @@
-# Codex with ChatGPT
+# Codex with ChatGPT Safe
+
+
+> [!NOTE]
+> **Safe fork：** 本分支不会从 ChatGPT 网页的 DOM、剪贴板、截图/OCR 或网络请求中
+> 自动提取回答。ChatGPT 会生成可下载的 C2C Markdown 文件，用户手动点击一次
+> **Download**，之后 Codex 只在本地 Downloads 目录中检测、校验并移动该文件。
+> Download 点击本身不会自动化。
+
 
 [English](README.md) | **简体中文**
 
@@ -16,6 +24,41 @@ ChatGPT 付费订阅的网页版额度大量闲置，Codex 却在消耗紧张的
 Codex 手里。你的仓库永远不会被上传——ChatGPT 通过一条安全的、OAuth 保护的
 **只读** MCP 连接，按需读取当前工作区里它真正需要的那几行代码。
 
+## 安全的 Markdown 回传
+
+本分支不会从 ChatGPT 网页 DOM、剪贴板、截图/OCR 或网络请求中自动提取回答。
+
+推荐在 **Windows + 独立 Ubuntu Server** 环境使用 Google Drive：
+
+```text
+ChatGPT Web
+   ↓ 官方 Google Drive App/Action
+Google Drive / C2C-Handoff / inbox
+   ↓ rclone
+Ubuntu Server
+   ↓
+Codex
+```
+
+ChatGPT 自己通过已连接的官方 Google Drive App 把 C2C Markdown 保存到 Drive，
+Ubuntu 只通过 `rclone` 读取自己的 Drive 文件。无需在 Windows 上手动下载。
+
+工作区配置示例：
+
+```bash
+c2c handoff configure -w <workspace> \
+  --backend google-drive \
+  --remote gdrive:C2C-Handoff/inbox \
+  --archive-remote gdrive:C2C-Handoff/processed
+
+c2c handoff status -w <workspace> --check --json
+```
+
+仍保留 `local` 后端作为备用：ChatGPT 生成可下载 Markdown，用户手动点击
+Download，然后 C2C 只监视本地文件系统。
+
+详细步骤见 [docs/google-drive-handoff.md](docs/google-drive-handoff.md)。
+
 ## 一段话安装（纯小白专用）
 
 不懂 git、Node、终端？完全不需要懂。把下面这段话原样复制给你的编码
@@ -27,8 +70,8 @@ Agent（Codex），然后去倒杯咖啡：
 
 1. 环境自检：需要 git 和 Node.js ≥ 20，缺什么就自动安装
   （macOS 用 Homebrew，Windows 用 winget），同时安装 cloudflared。
-2. 下载：把 https://github.com/XiaoDuoYa/codex-with-chatgpt 克隆到
-   ~/codex-with-chatgpt（已存在就 git pull 更新）。
+2. 下载：把 https://github.com/hideki-ozu/codex-with-chatgpt-safe 克隆到
+   ~/codex-with-chatgpt-safe（已存在就 git pull 更新）。
 3. 构建：在该目录里执行 corepack pnpm install 和 corepack pnpm build。
 4. 安装 Skill：把仓库里的 skill/SKILL.md 复制到
    ~/.codex/skills/codex-with-chatgpt/SKILL.md，并把文件中
@@ -49,7 +92,8 @@ Agent（Codex），然后去倒杯咖啡：
 
 1. 安装 Codex Skill：把 `skill/` 复制到 `~/.codex/skills/codex-with-chatgpt/`。
 2. 对 Codex 说：**"使用 Codex with ChatGPT 完成首次配置。"**
-3. 之后正常使用：**"使用 Codex with ChatGPT，帮我实现 XXX。"**
+3. 独立 Ubuntu Server 推荐配置 Google Drive handoff backend。
+4. 之后正常使用：**"使用 Codex with ChatGPT，帮我实现 XXX。"**
 
 说明书到此结束。你不需要知道 MCP、OAuth、Tunnel、端口、localhost 是什么——
 Codex 会自动完成所有配置，你只会看到：
