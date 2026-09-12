@@ -6,6 +6,15 @@ coding workflow.
 They are intended for the Ubuntu headless-browser setup where ChatGPT Web is
 already reachable with an authenticated Chromium session.
 
+**Important:** neither review pattern gives ChatGPT Web direct access to the
+Ubuntu repository. These review-only workflows do not require the workspace MCP
+bridge/tunnel just to provide the review source:
+
+- local-file review sends only explicitly selected files as ChatGPT attachments;
+- GitHub review asks ChatGPT to inspect GitHub-hosted content itself.
+
+The existing C2C handoff is used only to bring the review result back safely.
+
 ## 1. `chatgpt-file-review`
 
 Use when ChatGPT should review one or more explicitly selected files that exist
