@@ -30,8 +30,12 @@ whatever data it needs by itself.
    **Safe handoff boundary:** NEVER extract ChatGPT assistant output from the DOM,
    accessibility tree, screenshots/OCR, clipboard, browser network traffic, hidden
    endpoints, or automatic Download clicks. ChatGPT → Codex results must cross only
-   as Markdown files that the USER explicitly downloads; Codex may automate only the
-   local filesystem side with `c2c handoff wait`.
+   as C2C Markdown files through one configured safe backend:
+   - `google-drive`: ChatGPT itself saves the file with its connected official
+     Google Drive app/action; Ubuntu receives it through `rclone`.
+   - `local`: the USER explicitly clicks Download; Codex watches only the local
+     filesystem.
+   Codex must never automate the ChatGPT Download click.
 4. If something fails, run `c2c doctor` and repair silently. Only involve the user
    for logins, CAPTCHA, 2FA, explicit consent screens, or **guided manual
    ChatGPT setup** below — and then give them ONE action.
@@ -176,29 +180,42 @@ that close the tab, hide the window, or stall on the settings page.
    screenshots/OCR, or network responses, and do not click ChatGPT's Download
    control automatically.
 
-   For any ChatGPT → Codex result, ask ChatGPT to create the exact downloadable
-   C2C Markdown file described in `docs/protocol.md`. Tell the user once:
-   `ChatGPTにMarkdownファイルが表示されたら、Downloadを押してください。`
-   Immediately run the LOCAL watcher:
+   Before asking ChatGPT for any result, run:
+   `c2c handoff status -w <ws> --json`.
+
+   - **google-drive**: use the returned `chatgptFolder`. Ask ChatGPT to create
+     the exact C2C Markdown file and save it into that folder using its connected
+     official Google Drive app/action. The Drive file is authoritative. If ChatGPT
+     shows a normal confirmation for the write action, let the user approve it;
+     never bypass the confirmation.
+   - **local**: ask ChatGPT to create the exact downloadable C2C Markdown file.
+     Tell the user once:
+     `ChatGPTにMarkdownファイルが表示されたら、Downloadを押してください。`
+     Codex must not click Download.
+
+   For BOTH backends, immediately run the same receiver:
    `c2c handoff wait -w <ws> --task <task-id> --states <allowed-states> --json`.
-   The command watches only the local Downloads folder, validates the downloaded
-   file, moves it into the C2C state inbox (or an explicit `--inbox` directory), and returns the LOCAL file body.
+   The command reads only the configured backend, validates the file, stores it
+   in the local C2C state inbox, and returns the LOCAL parsed body.
 
    A browser/js timeout is not a reason to scrape the reply or resend a prompt.
-   If no file arrives, keep the visible tab available and let the user perform the
-   Download click. Never open a second tab or resend INIT/EXECUTED merely because
-   the local watcher timed out.
+   Never open a second tab or resend INIT/EXECUTED merely because the handoff
+   wait timed out.
 
 ## Safe workspace verification
 
 Never verify a workspace by reading a ChatGPT reply from the web page.
 
-1. In the current ChatGPT conversation send:
-   `Use the "<connectorName>" connector. Call workspace_info and read a harmless top-level hello-style file. Create a downloadable Markdown file named c2c-setup-verify-0.md with protocol=c2c, task_id=setup-verify, state=VERIFY, iteration=0. Put the workspace name and harmless filename in the file body. Do not rely on Codex reading your chat response.`
-2. Tell the user to click **Download** when that file appears. Codex must not click it.
-3. Run:
+1. Run `c2c handoff status -w <ws> --json` and note the backend and
+   `chatgptFolder` when present.
+2. In the current ChatGPT conversation send:
+   `Use the "<connectorName>" connector. Call workspace_info and read a harmless top-level hello-style file. Create c2c-setup-verify-0.md with protocol=c2c, task_id=setup, state=VERIFY, iteration=0. Put the workspace name and harmless filename in the file body. Return it through the C2C handoff transport I specify: for google-drive save it with your connected Google Drive app/action into "<chatgptFolder>"; for local create it as a downloadable file. Do not rely on Codex reading your visible chat response.`
+3. If backend is local, tell the user to click **Download** when the file appears.
+   If backend is google-drive, do not ask for Download; allow a normal Drive write
+   confirmation if ChatGPT requests one.
+4. Run:
    `c2c handoff wait -w <ws> --task setup --iteration 0 --states VERIFY --json`
-4. Compare the returned LOCAL Markdown body with the expected `workspaceName`.
+5. Compare the returned LOCAL Markdown body with the expected `workspaceName`.
    Only after it matches may you save or replace the ChatGPT conversation URL.
 
 ## Locations
@@ -211,6 +228,31 @@ Never verify a workspace by reading a ChatGPT reply from the web page.
 - If the checkout has no `node_modules` or no `dist/`, first run
   `corepack pnpm install && corepack pnpm build` inside it.
 - Always pass `-w <workspace root>` (the project the user is working on, NOT the c2c repo).
+
+## Handoff backend
+
+Run `c2c handoff status -w <workspace> --json` before every workflow that
+expects a ChatGPT result.
+
+- Existing / unconfigured workspaces default to `local`.
+- For a remote Ubuntu Server, prefer `google-drive`.
+
+Google Drive setup on the executor:
+
+1. Install and configure `rclone` so a remote such as `gdrive:` can access
+   the user's Drive. Headless OAuth setup may require a one-time browser
+   authorization on another machine.
+2. Ensure the folders exist, e.g. `C2C-Handoff/inbox` and
+   `C2C-Handoff/processed`.
+3. Save per-workspace configuration:
+   `c2c handoff configure -w <ws> --backend google-drive --remote gdrive:C2C-Handoff/inbox --archive-remote gdrive:C2C-Handoff/processed`
+4. Verify:
+   `c2c handoff status -w <ws> --check --json`
+5. The ChatGPT account must have its Google Drive app connected with permission
+   to create/upload files. If it is not connected or ChatGPT asks for a normal
+   write confirmation, involve the user for that one product action.
+
+Never silently switch a workspace from one backend to another.
 
 ## Daily update check
 
@@ -525,20 +567,28 @@ Be substantive: why, which file, what to test. No empty one-liners and
 no 40-step epics.
 
 For every planning/review result requested by Codex, create the requested
-downloadable C2C Markdown handoff file. The file is authoritative. Keep the
-visible chat response minimal and never rely on Codex reading that response.
+C2C Markdown handoff file. The file is authoritative. Codex will specify the
+return transport:
+- google-drive: use your connected official Google Drive app/action and save
+  the exact file into the specified Drive folder.
+- local: create the exact downloadable file for the user.
+Keep the visible chat response minimal and never rely on Codex reading it.
 ```
 
 ## Workflow: coding task（"使用 Codex with ChatGPT 完成 XXX"）
 
 Protocol states remain INIT → PLAN → EXECUTING → EXECUTED → REVIEW → (PLAN | DONE | BLOCKED).
-ChatGPT → Codex results arrive ONLY through user-downloaded Markdown handoff files.
+ChatGPT → Codex results arrive ONLY as validated C2C Markdown handoff files.
 Do not read ChatGPT response text from the browser.
 
 0. `c2c tunnel status -w <workspace> --json`. If `needsChoice`, follow
    **Connection choice**. Then run `c2c doctor -w <workspace> --json`.
-   The doctor gate is unchanged: if local connectivity is not green, repair it
-   before sending C2C prompts.
+   The doctor gate is unchanged: repair connectivity before sending C2C prompts.
+   Also run `c2c handoff status -w <workspace> --json` and remember:
+   - `config.backend`
+   - `chatgptFolder` when backend is `google-drive`.
+   If google-drive is configured, `c2c handoff status --check --json` must
+   succeed before starting the task.
 
 1. Resolve the conversation using `c2c session -w <workspace> --json`.
    Reuse/bind the appropriate chat as described under Conversation management.
@@ -550,15 +600,31 @@ Do not read ChatGPT response text from the browser.
    - `BLOCKED`: surface the stored local reason.
    - `EXECUTED_LOCAL`: send EXECUTED; do not re-run work.
    - `EXECUTING` / `PLAN_RECEIVED`: continue local execution when the plan is
-     already available in the C2C handoff inbox; otherwise request a fresh downloadable
-     PLAN handoff.
-   - `INIT` / waiting for GPT_PLAN: do not resend INIT automatically. Start the
-     local handoff watcher and let the user download the pending PLAN file.
-   - `EXECUTED_SENT` / waiting for GPT_REVIEW: do not resend EXECUTED
-     automatically. Start the local handoff watcher for PLAN,DONE,BLOCKED.
+     already available in the C2C handoff inbox; otherwise request a fresh PLAN.
+   - `INIT` / waiting for GPT_PLAN: do not resend INIT automatically. Run
+     `c2c handoff wait` for the pending PLAN.
+   - `EXECUTED_SENT` / waiting for GPT_REVIEW: do not resend EXECUTED.
+     Run `c2c handoff wait` for PLAN,DONE,BLOCKED.
 
-2. For a new task, create a task id such as `c2c_f81a`, send INIT, and explicitly
-   request a downloadable first-plan file:
+2. For a new task, create a task id such as `c2c_f81a`. Build the return
+   instruction from the configured backend:
+
+   **google-drive**
+   ```text
+   RETURN:
+   Create c2c-c2c_f81a-plan-1.md and save it with your connected official
+   Google Drive app/action into: <chatgptFolder>
+   The Drive file is authoritative. Do not rely on Codex reading your visible response.
+   ```
+
+   **local**
+   ```text
+   RETURN:
+   Create a downloadable file named c2c-c2c_f81a-plan-1.md.
+   Do not rely on Codex reading your visible response.
+   ```
+
+   Send INIT:
 
 ```text
 [C2C]
@@ -571,41 +637,40 @@ GOAL:
 
 INSTRUCTION:
 Inspect the connected workspace through the Codex with ChatGPT MCP connector.
-Create a downloadable Markdown file named c2c-c2c_f81a-plan-1.md.
-Its frontmatter must contain:
+Create the PLAN handoff with:
 protocol: c2c
 task_id: c2c_f81a
 state: PLAN
 iteration: 1
 
 Put rationale, concrete actions, likely files, tests, and success criteria in
-that file. Do not rely on Codex reading your visible chat response.
+the file.
+
+<RETURN block for configured backend>
 ```
 
-   It is acceptable to verify that the USER'S submitted INIT text is present in
-   the composer/thread, but do not inspect ChatGPT's answer.
+   Save:
+   `c2c session set -w <ws> --task <id> --iteration 0 --state INIT --protocol-state INIT --waiting-for GPT_PLAN --goal "<short goal>" --next-step "wait for PLAN handoff"`
 
-   Save the checkpoint:
-   `c2c session set -w <ws> --task <id> --iteration 0 --state INIT --protocol-state INIT --waiting-for GPT_PLAN --goal "<short goal>" --next-step "wait for downloaded PLAN"`
+3. Receive the first PLAN:
+   - google-drive: do not ask the user to Download. If ChatGPT presents a normal
+     Google Drive write confirmation, let the user approve it.
+   - local: tell the user to click Download when the file appears.
 
-3. Tell the user:
-   `ChatGPTに c2c-<task>-plan-1.md が表示されたら、Downloadを押してください。`
-   Then wait only on the local filesystem:
-
+   In both cases:
    `c2c handoff wait -w <ws> --task <id> --iteration 1 --states PLAN --json`
 
-   Read the returned LOCAL `body` / `inboxPath`. Validate that the plan has
-   rationale, actionable changes, tests, and success criteria. If it needs more
-   detail, send a visible follow-up asking ChatGPT to create a replacement PLAN
-   file; again receive it only through manual Download + local watcher.
+   Read only the returned LOCAL `body` / `inboxPath`. Validate rationale,
+   actionable changes, tests, and success criteria. If more detail is required,
+   ask ChatGPT to create a replacement PLAN through the SAME configured backend.
 
    Then:
-   `c2c session set -w <ws> --protocol-state PLAN_RECEIVED --waiting-for none --next-step "execute downloaded PLAN"`
+   `c2c session set -w <ws> --protocol-state PLAN_RECEIVED --waiting-for none --next-step "execute received PLAN"`
 
 4. Execute the plan with Codex's own local tools. Before starting:
    `c2c session set -w <ws> --protocol-state EXECUTING --waiting-for none --next-step "finish PLAN then record"`
 
-5. Record execution metadata as before:
+5. Record execution metadata:
    `c2c record -w <ws> --task <id> --iteration <n> --changed-files "<...>" --tests "<...>" --exit-status ok`
    When a test/build/lint/typecheck produced useful output, use the existing
    sanitized `--command` + `--output-file` path. Never paste logs into ChatGPT.
@@ -613,7 +678,7 @@ that file. Do not rely on Codex reading your visible chat response.
    Then:
    `c2c session set -w <ws> --iteration <n> --state EXECUTED --protocol-state EXECUTED_LOCAL --waiting-for none --next-step "send EXECUTED"`
 
-6. Send EXECUTED and request exactly one downloadable result file:
+6. Send EXECUTED with the same backend-specific RETURN instruction:
 
 ```text
 [C2C]
@@ -627,37 +692,38 @@ Execution finished.
 Independently inspect the current code, git diff, tests, and any released
 execution output through MCP.
 
-If more work is needed, create a downloadable PLAN Markdown handoff.
-If the task is complete, create a downloadable DONE Markdown handoff.
-If blocked, create a downloadable BLOCKED Markdown handoff.
+If more work is needed, create a PLAN C2C Markdown handoff.
+If complete, create a DONE C2C Markdown handoff.
+If blocked, create a BLOCKED C2C Markdown handoff.
 Use the same task_id and valid C2C frontmatter.
-Do not rely on Codex reading your visible chat response.
+Return exactly one result file through the configured backend.
+Do not rely on Codex reading your visible response.
 ```
 
    Save:
-   `c2c session set -w <ws> --protocol-state EXECUTED_SENT --waiting-for GPT_REVIEW --next-step "wait for downloaded PLAN/DONE/BLOCKED"`
+   `c2c session set -w <ws> --protocol-state EXECUTED_SENT --waiting-for GPT_REVIEW --next-step "wait for PLAN/DONE/BLOCKED handoff"`
 
-7. Tell the user to click Download when ChatGPT presents the Markdown file.
-   Then run:
-
+7. Receive:
    `c2c handoff wait -w <ws> --task <id> --states PLAN,DONE,BLOCKED --json`
 
-   The watcher ignores stale/unrelated Markdown, validates frontmatter, moves the
-   accepted file to the C2C state inbox (or `--inbox`), and returns its LOCAL body.
+   For google-drive, the receiver polls the configured Drive inbox through
+   `rclone`, validates the file locally, then moves the remote source into
+   `archive-remote` when configured. For local, it watches the local Downloads
+   folder. Both return the same LOCAL parsed payload.
 
 8. Branch only on the LOCAL handoff state:
-   - `PLAN`: save PLAN_RECEIVED, execute it, then repeat from step 4.
-   - `DONE`: summarize the result and
+   - `PLAN`: save PLAN_RECEIVED, execute it, repeat from step 4.
+   - `DONE`: summarize and
      `c2c session set -w <ws> --state DONE --clear-checkpoint`.
    - `BLOCKED`: save
      `c2c session set -w <ws> --protocol-state BLOCKED --waiting-for USER --known-issues "<short local summary>"`
      and surface the one decision the user must make.
 
-9. Respect `maxIterations` (`.c2c.json`, default 12). At the limit, pause and
-   ask whether to continue.
+9. Respect `maxIterations` (`.c2c.json`, default 12).
 
-10. **Never automate the Download click.** The manual Download operation is the
-    explicit boundary between ChatGPT Web and local automation.
+10. **Never scrape ChatGPT output and never automate the Download click.**
+    Google Drive writes must be initiated by ChatGPT through its connected
+    official Google Drive app/action.
 
 ## Workflow: disconnect（"断开 ChatGPT"）
 
@@ -711,9 +777,9 @@ the previous public address is gone. Doctor already started a new one.
    Run **Safe workspace verification** with the exact `connectorName`.
    Doctor green is not enough: the old conversation may still be bound to the
    deleted connector.
-   - If the downloaded LOCAL VERIFY file names this workspace: continue there.
+   - If the received LOCAL VERIFY file names this workspace: continue there.
      Save the URL if needed.
-   - If verification fails or no valid file is downloaded: do **not** scrape
+   - If verification fails or no valid handoff file is received: do **not** scrape
      the page and do not keep retrying that old URL. project → collection page,
      new chat in this Project, boot + HANDOFF from `session.checkpoint` (no
      logs), then **Safe workspace verification**; `c2c session set --url` only
