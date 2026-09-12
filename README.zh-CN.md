@@ -1,4 +1,12 @@
-# Codex with ChatGPT
+# Codex with ChatGPT Safe
+
+
+> [!NOTE]
+> **Safe fork：** 本分支不会从 ChatGPT 网页的 DOM、剪贴板、截图/OCR 或网络请求中
+> 自动提取回答。ChatGPT 会生成可下载的 C2C Markdown 文件，用户手动点击一次
+> **Download**，之后 Codex 只在本地 Downloads 目录中检测、校验并移动该文件。
+> Download 点击本身不会自动化。
+
 
 [English](README.md) | **简体中文**
 
@@ -27,8 +35,8 @@ Agent（Codex），然后去倒杯咖啡：
 
 1. 环境自检：需要 git 和 Node.js ≥ 20，缺什么就自动安装
   （macOS 用 Homebrew，Windows 用 winget），同时安装 cloudflared。
-2. 下载：把 https://github.com/XiaoDuoYa/codex-with-chatgpt 克隆到
-   ~/codex-with-chatgpt（已存在就 git pull 更新）。
+2. 下载：把 https://github.com/hideki-ozu/codex-with-chatgpt-safe 克隆到
+   ~/codex-with-chatgpt-safe（已存在就 git pull 更新）。
 3. 构建：在该目录里执行 corepack pnpm install 和 corepack pnpm build。
 4. 安装 Skill：把仓库里的 skill/SKILL.md 复制到
    ~/.codex/skills/codex-with-chatgpt/SKILL.md，并把文件中
