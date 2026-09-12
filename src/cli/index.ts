@@ -795,6 +795,7 @@ handoffCmd
   .option("--iteration <n>", "optional exact iteration", parseNonNegativeInteger)
   .option("--states <states>", "comma-separated allowed states", "PLAN,DONE,BLOCKED")
   .option("--downloads <path>", "local download folder (or set C2C_DOWNLOADS_DIR)")
+  .option("--inbox <path>", "destination directory for accepted handoff files")
   .option("--timeout <seconds>", "seconds to wait for the manual download", parseNonNegativeInteger, 1800)
   .option("--json", "machine-readable output", false)
   .action(
@@ -804,6 +805,7 @@ handoffCmd
       iteration?: number;
       states: string;
       downloads?: string;
+      inbox?: string;
       timeout: number;
       json: boolean;
     }) => {
@@ -816,12 +818,14 @@ handoffCmd
           throw new Error(`states must be a comma-separated subset of ${HANDOFF_STATES.join(", ")}`);
         }
 
+        const workspace = new Workspace(resolveWorkspace(opts.workspace));
         const result = await waitForHandoff({
-          workspaceRoot: resolveWorkspace(opts.workspace),
+          workspaceId: workspace.id,
           taskId: opts.task,
           iteration: opts.iteration,
           allowedStates: states as HandoffState[],
           sourceDir: opts.downloads ? path.resolve(opts.downloads) : defaultDownloadsDir(),
+          inboxDir: opts.inbox ? path.resolve(opts.inbox) : undefined,
           timeoutMs: opts.timeout * 1000,
         });
 
