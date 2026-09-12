@@ -56,6 +56,12 @@ import {
 } from "../session/state.js";
 import { appendExecutionRecord } from "../execution/records.js";
 import { saveExecutionOutput } from "../execution/output.js";
+import {
+  HANDOFF_STATES,
+  defaultDownloadsDir,
+  waitForHandoff,
+  type HandoffState,
+} from "../handoff/files.js";
 
 const program = new Command();
 
@@ -774,6 +780,70 @@ program
       say(`路径：${data.root}`);
     }
   });
+
+// ---------------------------------------------------------------- handoff (user-downloaded ChatGPT Markdown -> local inbox)
+
+const handoffCmd = program
+  .command("handoff")
+  .description("Receive ChatGPT handoff Markdown from the local Downloads folder");
+
+handoffCmd
+  .command("wait")
+  .description("Wait for a user-downloaded C2C Markdown handoff and move it into .c2c/inbox")
+  .option("-w, --workspace <path>")
+  .requiredOption("--task <id>", "C2C task id expected in YAML frontmatter")
+  .option("--iteration <n>", "optional exact iteration", parseNonNegativeInteger)
+  .option("--states <states>", "comma-separated allowed states", "PLAN,DONE,BLOCKED")
+  .option("--downloads <path>", "local download folder (or set C2C_DOWNLOADS_DIR)")
+  .option("--timeout <seconds>", "seconds to wait for the manual download", parseNonNegativeInteger, 1800)
+  .option("--json", "machine-readable output", false)
+  .action(
+    async (opts: {
+      workspace?: string;
+      task: string;
+      iteration?: number;
+      states: string;
+      downloads?: string;
+      timeout: number;
+      json: boolean;
+    }) => {
+      try {
+        const states = opts.states
+          .split(",")
+          .map((value) => value.trim().toUpperCase())
+          .filter(Boolean);
+        if (states.length === 0 || states.some((state) => !HANDOFF_STATES.includes(state as HandoffState))) {
+          throw new Error(`states must be a comma-separated subset of ${HANDOFF_STATES.join(", ")}`);
+        }
+
+        const result = await waitForHandoff({
+          workspaceRoot: resolveWorkspace(opts.workspace),
+          taskId: opts.task,
+          iteration: opts.iteration,
+          allowedStates: states as HandoffState[],
+          sourceDir: opts.downloads ? path.resolve(opts.downloads) : defaultDownloadsDir(),
+          timeoutMs: opts.timeout * 1000,
+        });
+
+        const payload = {
+          ok: true,
+          taskId: result.taskId,
+          state: result.state,
+          iteration: result.iteration,
+          inboxPath: result.inboxPath,
+          sourcePath: result.sourcePath,
+          body: result.body,
+        };
+        if (opts.json) say(JSON.stringify(payload));
+        else {
+          check(`Markdown handoff received: ${result.state} (iteration ${result.iteration})`);
+          say(result.inboxPath);
+        }
+      } catch (error) {
+        handleCliError(error, opts.json);
+      }
+    }
+  );
 
 // ---------------------------------------------------------------- sandbox-allow (Codex writable_roots, macOS + Windows)
 
