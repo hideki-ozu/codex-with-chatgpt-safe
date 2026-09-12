@@ -68,6 +68,7 @@ import {
   type HandoffBackend,
 } from "../handoff/config.js";
 import {
+  chatgptDriveFolderFromRemote,
   checkRcloneDrive,
   waitForGoogleDriveHandoff,
 } from "../handoff/google-drive.js";
@@ -842,8 +843,15 @@ handoffCmd
               },
             };
       const saved = writeHandoffConfig(workspace.id, config);
-      if (opts.json) say(JSON.stringify({ ok: true, workspaceId: workspace.id, config: saved }));
-      else check(`Handoff backend configured: ${saved.backend}`);
+      const chatgptFolder =
+        saved.backend === "google-drive" && saved.googleDrive
+          ? chatgptDriveFolderFromRemote(saved.googleDrive.remote)
+          : undefined;
+      if (opts.json) say(JSON.stringify({ ok: true, workspaceId: workspace.id, config: saved, chatgptFolder }));
+      else {
+        check(`Handoff backend configured: ${saved.backend}`);
+        if (chatgptFolder) say(`ChatGPT Drive folder: ${chatgptFolder}`);
+      }
     } catch (error) {
       handleCliError(error, opts.json);
     }
@@ -866,7 +874,11 @@ handoffCmd
           config.googleDrive.rcloneBin ?? "rclone"
         );
       }
-      const payload = { ok: true, workspaceId: workspace.id, config, check: checkResult };
+      const chatgptFolder =
+        config.backend === "google-drive" && config.googleDrive
+          ? chatgptDriveFolderFromRemote(config.googleDrive.remote)
+          : undefined;
+      const payload = { ok: true, workspaceId: workspace.id, config, chatgptFolder, check: checkResult };
       if (opts.json) say(JSON.stringify(payload));
       else {
         say(`Backend: ${config.backend}`);
